@@ -1,0 +1,24 @@
+name: baton
+
+services:
+  baton:
+    build: .
+    container_name: baton
+    restart: unless-stopped
+    network_mode: bridge
+    environment:
+      # 172.17.0.1 is the docker bridge gateway -> reaches the host where
+      # MPD and Navidrome bind. Override via .env for other topologies.
+      MPD_HOST: ${MPD_HOST:-172.17.0.1}
+      MPD_PORT: ${MPD_PORT:-6600}
+      MPD_PASSWORD: ${MPD_PASSWORD:-}
+      NAVIDROME_URL: ${NAVIDROME_URL:-http://172.17.0.1:4533}
+      NAVIDROME_USER: ${NAVIDROME_USER:?set in .env}
+      NAVIDROME_PASSWORD: ${NAVIDROME_PASSWORD:?set in .env}
+      NAVIDROME_LEGACY_AUTH: ${NAVIDROME_LEGACY_AUTH:-0}
+      POLL_INTERVAL: ${POLL_INTERVAL:-5}
+      MODE: ${MODE:-auto}
+      BATON_LISTEN: ${BATON_LISTEN:-0.0.0.0:8080}
+      BATON_API_TOKEN: ${BATON_API_TOKEN:-}
+    ports:
+      - "${BATON_PORT:-8080}:8080"

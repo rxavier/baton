@@ -1,0 +1,53 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [linux-amd64, linux-arm64, darwin-amd64, darwin-arm64, windows-amd64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build static binary
+        run: |
+          os=${TARGET%-*}; arch=${TARGET#*-}
+          ext=; [ "$os" = "windows" ] && ext=.exe
+          CGO_ENABLED=0 GOOS=$os GOARCH=$arch \
+            go build -trimpath -ldflags="-s -w" -o dist/baton-$TARGET$ext .
+        env:
+          TARGET: ${{ matrix.target }}
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: baton-${{ matrix.target }}
+          path: dist/baton-${{ matrix.target }}*
+
+  release:
+    name: publish release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        run: |
+          cd dist && sha256sum baton-* > SHA256SUMS
+          ls -la
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

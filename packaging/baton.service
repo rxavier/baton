@@ -1,0 +1,18 @@
+[Unit]
+Description=baton - bridge MPD's play queue to Navidrome's Subsonic play queue
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Environment file holds NAVIDROME_USER / NAVIDROME_PASSWORD etc.
+EnvironmentFile=-/etc/baton/baton.env
+ExecStart=/usr/local/bin/baton
+Restart=on-failure
+RestartSec=5
+# Optional hardening
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

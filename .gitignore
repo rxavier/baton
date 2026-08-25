@@ -1,0 +1,21 @@
+# Local config (never commit real credentials)
+.env
+.env.local
+baton.env
+
+# Go build artifacts
+baton
+/dist/
+*.exe
+
+# Python legacy leftovers
+__pycache__/
+*.py[cod]
+.venv/
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
