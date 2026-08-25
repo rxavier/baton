@@ -85,9 +85,9 @@ Docker access needs root privileges (sudo, or a user in the `docker` group).
 
 docker compose reads a `.env` file **in this directory** (or your shell environment) and
 injects the values as environment variables into the container — it does **not** read
-`/etc/baton/baton.env`. It must define at least `NAVIDROME_USER` and `NAVIDROME_PASSWORD`
-(compose refuses to start without them); everything else is optional with the defaults in
-`docker-compose.yml` (notably `MPD_HOST` and `NAVIDROME_URL` default to the bridge gateway
+`/etc/baton/baton.env`. It must define `NAVIDROME_URL`, `NAVIDROME_USER` and
+`NAVIDROME_PASSWORD` (compose refuses to start without them); everything else is optional with
+the defaults in `docker-compose.yml` (notably `MPD_HOST` defaults to the bridge gateway
 `172.17.0.1`):
 
 ```sh
@@ -130,9 +130,9 @@ Use the **same Navidrome account** as your music clients so they all share one q
 
 | Env var                 | Default                 | Meaning                                        |
 |-------------------------|-------------------------|------------------------------------------------|
-| `NAVIDROME_URL`         | `http://127.0.0.1:4533` | Subsonic base URL (docker default `http://172.17.0.1:4533`) |
-| `NAVIDROME_USER`        | —                       | Navidrome username (required)                  |
-| `NAVIDROME_PASSWORD`    | —                       | Navidrome password (required)                  |
+| `NAVIDROME_URL`         | — (required)            | Navidrome URL or `host:port` (http:// is added)|
+| `NAVIDROME_USER`        | — (required)            | Navidrome username                             |
+| `NAVIDROME_PASSWORD`    | — (required)            | Navidrome password                             |
 | `NAVIDROME_LEGACY_AUTH` | `0`                     | `1` for plaintext `p=` auth                    |
 | `MPD_HOST`              | `127.0.0.1`             | MPD host (docker default `172.17.0.1`)         |
 | `MPD_PORT`              | `6600`                  | MPD port                                       |

@@ -81,6 +81,22 @@ func TestPositionFor(t *testing.T) {
 
 var _ = time.Second
 
+func TestNormalizeURL(t *testing.T) {
+	cases := map[string]string{
+		"192.168.1.10:4533":     "http://192.168.1.10:4533",
+		"127.0.0.1:4533":        "http://127.0.0.1:4533",
+		"navidrome:4533":        "http://navidrome:4533",
+		"http://navidrome:4533": "http://navidrome:4533",
+		"https://n.example.com": "https://n.example.com",
+		"":                      "",
+	}
+	for in, want := range cases {
+		if got := normalizeURL(in); got != want {
+			t.Errorf("normalizeURL(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestReadDotenv(t *testing.T) {
 	dir := t.TempDir()
 	p := dir + "/baton.env"

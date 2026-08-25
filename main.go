@@ -153,7 +153,7 @@ func loadConfig() Config {
 	}
 
 	c := Config{}
-	c.NavidromeURL = pick("navidrome-url", "NAVIDROME_URL", cURL, "http://127.0.0.1:4533")
+	c.NavidromeURL = pick("navidrome-url", "NAVIDROME_URL", cURL, "")
 	c.NavidromeUser = pick("navidrome-user", "NAVIDROME_USER", cUser, "")
 	c.NavidromePass = pick("navidrome-password", "NAVIDROME_PASSWORD", cPass, "")
 	c.NavidromeLegacy = pickBool("legacy-auth", "NAVIDROME_LEGACY_AUTH")
@@ -179,6 +179,14 @@ func mustInt(s string) int {
 		log.Fatalf("invalid int: %s", s)
 	}
 	return i
+}
+
+// normalizeURL adds http:// when the value is a bare host:port.
+func normalizeURL(u string) string {
+	if u == "" || strings.HasPrefix(u, "http://") || strings.HasPrefix(u, "https://") {
+		return u
+	}
+	return "http://" + u
 }
 
 func mustFloat(s string) float64 {
@@ -1161,10 +1169,13 @@ func main() {
 	cfg := loadConfig()
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 
-	if cfg.NavidromeUser == "" || cfg.NavidromePass == "" {
-		log.Fatal("NAVIDROME_USER and NAVIDROME_PASSWORD are required. Set them in " +
-			"your --env-file, as environment variables, or with --navidrome-user/--navidrome-password.")
+	if cfg.NavidromeURL == "" || cfg.NavidromeUser == "" || cfg.NavidromePass == "" {
+		log.Fatal("NAVIDROME_URL, NAVIDROME_USER and NAVIDROME_PASSWORD are required. Set them " +
+			"in your --env-file, as environment variables, or with --navidrome-url/--navidrome-user/" +
+			"--navidrome-password.")
 	}
+	// Accept "host:port" and add a scheme.
+	cfg.NavidromeURL = normalizeURL(cfg.NavidromeURL)
 	if cfg.PollInterval <= 0 {
 		cfg.PollInterval = 5 * time.Second
 	}

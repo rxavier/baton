@@ -7,12 +7,12 @@ services:
     restart: unless-stopped
     network_mode: bridge
     environment:
-      # 172.17.0.1 is the docker bridge gateway -> reaches the host where
-      # MPD and Navidrome bind. Override via .env for other topologies.
+      # The bridge gateway 172.17.0.1 reaches the host. Override via .env for
+      # other topologies (e.g. Navidrome in its own container -> http://navidrome:4533).
       MPD_HOST: ${MPD_HOST:-172.17.0.1}
       MPD_PORT: ${MPD_PORT:-6600}
       MPD_PASSWORD: ${MPD_PASSWORD:-}
-      NAVIDROME_URL: ${NAVIDROME_URL:-http://172.17.0.1:4533}
+      NAVIDROME_URL: ${NAVIDROME_URL:?set in .env — URL or host:port of your Navidrome}
       NAVIDROME_USER: ${NAVIDROME_USER:?set in .env}
       NAVIDROME_PASSWORD: ${NAVIDROME_PASSWORD:?set in .env}
       NAVIDROME_LEGACY_AUTH: ${NAVIDROME_LEGACY_AUTH:-0}
