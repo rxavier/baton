@@ -66,13 +66,18 @@ chmod +x baton-linux-amd64
 
 ### systemd (recommended on Linux)
 
+Requires root (it installs a system service into `/usr/local` and `/etc`):
+
 ```sh
-make install            # builds, installs to /usr/local/bin, installs the unit,
-                        # creates /etc/baton/baton.env from .env.example, enables+starts
+sudo make install       # builds, installs to /usr/local/bin, creates
+                        # /etc/baton/baton.env from .env.example, enables+starts
 systemctl status baton
 ```
 
-(If Go isn't on root's PATH, use `sudo env PATH="$PATH" make install`.)
+Edit `/etc/baton/baton.env` to set your credentials, then `sudo systemctl restart baton`.
+
+Not running as root? Skip systemd and run the binary directly with your own config —
+no root needed: `baton --env-file /path/to/your.env`.
 
 ### docker compose
 
