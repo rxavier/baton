@@ -81,9 +81,18 @@ no root needed: `baton --env-file /path/to/your.env`.
 
 ### docker compose
 
-Docker access needs root privileges (sudo, or a user in the `docker` group):
+Docker access needs root privileges (sudo, or a user in the `docker` group).
+
+docker compose reads a `.env` file **in this directory** (or your shell environment) and
+injects the values as environment variables into the container — it does **not** read
+`/etc/baton/baton.env`. It must define at least `NAVIDROME_USER` and `NAVIDROME_PASSWORD`
+(compose refuses to start without them); everything else is optional with the defaults in
+`docker-compose.yml` (notably `MPD_HOST` and `NAVIDROME_URL` default to the bridge gateway
+`172.17.0.1`):
 
 ```sh
+cp .env.example .env    # docker compose reads THIS .env, next to docker-compose.yml
+# edit NAVIDROME_USER / NAVIDROME_PASSWORD (and any overrides)
 docker compose up -d --build
 ```
 
