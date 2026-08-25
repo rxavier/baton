@@ -81,6 +81,8 @@ no root needed: `baton --env-file /path/to/your.env`.
 
 ### docker compose
 
+Docker access needs root privileges (sudo, or a user in the `docker` group):
+
 ```sh
 docker compose up -d --build
 ```
