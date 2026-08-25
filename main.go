@@ -1116,22 +1116,60 @@ func (a *APIServer) auth(next http.HandlerFunc) http.HandlerFunc {
 }
 
 type statusResponse struct {
-	MPDState      string   `json:"mpd_state"`
-	CurrentSong   string   `json:"current_song"`
-	PositionMs    *int     `json:"position_ms"`
-	Queue         []string `json:"queue"`
-	RemoteChanged string   `json:"remote_changed"`
-	LastPushTS    string   `json:"last_push_ts"`
-	Mode          string   `json:"mode"`
+	MPDState      string        `json:"mpd_state"`
+	Mode          string        `json:"mode"`
+	Current       *mpdEntry     `json:"current"`
+	PositionMs    *int          `json:"position_ms"`
+	Queue         []mpdEntry    `json:"queue"`
+	RemoteChanged string        `json:"remote_changed"`
+	LastPushTS    string        `json:"last_push_ts"`
+	RemoteQueue   []remoteEntry `json:"remote_queue"`
+	RemoteCurrent string        `json:"remote_current"`
+	RemotePosMs   *int          `json:"remote_position_ms"`
+}
+
+type mpdEntry struct {
+	File   string `json:"file"`
+	Title  string `json:"title"`
+	Artist string `json:"artist"`
+	Album  string `json:"album"`
+	Track  int    `json:"track"`
+}
+
+type remoteEntry struct {
+	ID     string `json:"id"`
+	Title  string `json:"title"`
+	Artist string `json:"artist"`
+	Album  string `json:"album"`
+	Track  int    `json:"track"`
+}
+
+func toMPDEntry(s map[string]any) mpdEntry {
+	track := 0
+	if t := intVal(s, "track"); t != nil {
+		track = *t
+	}
+	return mpdEntry{
+		File:   strVal(s, "file"),
+		Title:  strVal(s, "title"),
+		Artist: strVal(s, "artist"),
+		Album:  strVal(s, "album"),
+		Track:  track,
+	}
 }
 
 func (a *APIServer) status(w http.ResponseWriter, r *http.Request) {
 	st := statusResponse{
-		MPDState:    a.engine.mpd.state(),
-		CurrentSong: strVal(a.engine.mpd.currentsong(), "file"),
-		PositionMs:  a.engine.mpd.elapsedMs(),
-		Queue:       a.engine.mpd.queueFiles(),
-		Mode:        a.cfg.Mode,
+		MPDState:   a.engine.mpd.state(),
+		PositionMs: a.engine.mpd.elapsedMs(),
+		Mode:       a.cfg.Mode,
+	}
+	if cur := a.engine.mpd.currentsong(); cur["file"] != nil {
+		e := toMPDEntry(cur)
+		st.Current = &e
+	}
+	for _, s := range a.engine.mpd.playlistinfo() {
+		st.Queue = append(st.Queue, toMPDEntry(s))
 	}
 	a.engine.mu.Lock()
 	if a.engine.lastPushTS.IsZero() {
@@ -1142,6 +1180,15 @@ func (a *APIServer) status(w http.ResponseWriter, r *http.Request) {
 	a.engine.mu.Unlock()
 	if pq, err := a.engine.subsonic.GetPlayQueue(); err == nil && pq != nil {
 		st.RemoteChanged = pq.Changed
+		st.RemoteCurrent = pq.Current
+		for _, e := range pq.Entry {
+			st.RemoteQueue = append(st.RemoteQueue, remoteEntry{
+				ID: e.ID, Title: e.Title, Artist: e.Artist, Album: e.Album, Track: e.Track,
+			})
+		}
+		if ms := positionFor(pq, 0); ms != nil && st.RemoteCurrent != "" {
+			st.RemotePosMs = ms
+		}
 	}
 	writeJSON(w, st)
 }

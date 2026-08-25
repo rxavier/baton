@@ -5,108 +5,288 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>baton</title>
 <style>
-  :root { color-scheme: dark; }
-  body { font-family: system-ui, sans-serif; background:#111; color:#eee; margin:0; padding:24px; }
-  h1 { font-size:20px; }
-  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-  button { padding:8px 16px; border:0; border-radius:6px; cursor:pointer; font-size:14px; }
-  #push { background:#2d6cdf; color:#fff; }
-  #pull { background:#2e7d32; color:#fff; }
-  .card { background:#1c1c1c; border:1px solid #333; border-radius:8px; padding:16px; margin-top:16px; }
-  .badge { padding:2px 10px; border-radius:999px; font-size:12px; }
-  .badge.play { background:#2e7d32; }
-  .badge.pause { background:#b26a00; }
-  .badge.stop { background:#555; }
-  ul { list-style:none; padding:0; margin:8px 0 0; }
-  li { padding:4px 8px; border-radius:4px; }
-  li.current { background:#2d6cdf55; }
-  .meta { color:#999; font-size:13px; margin-top:8px; }
-  #msg { color:#ffb74d; margin-top:12px; min-height:18px; }
+  :root {
+    --paper: #faf4e8;
+    --ink: #17151f;
+    --muted: #6b6572;
+    --mpd: #f0506e;
+    --nav: #4f46e5;
+    --mpd-tint: rgba(240, 80, 110, .10);
+    --nav-tint: rgba(79, 70, 229, .10);
+    --card: rgba(255, 255, 255, .78);
+    --line: rgba(23, 21, 31, .09);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    color: var(--ink);
+    background:
+      radial-gradient(1100px 620px at 8% -10%, rgba(240,80,110,.14), transparent 60%),
+      radial-gradient(1100px 620px at 92% 112%, rgba(79,70,229,.14), transparent 60%),
+      var(--paper);
+    min-height: 100vh;
+    padding: clamp(16px, 3vw, 40px);
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; }
+
+  /* header */
+  header {
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    margin-bottom: 18px;
+  }
+  .wordmark {
+    font-size: clamp(26px, 4vw, 40px); font-weight: 900; letter-spacing: -0.03em;
+    display: flex; align-items: center; gap: 10px; margin: 0;
+  }
+  .wordmark .dot {
+    width: 16px; height: 16px; border-radius: 50%;
+    background: conic-gradient(from 210deg, var(--mpd), #b967ff, var(--nav));
+  }
+  .badge {
+    font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em;
+    padding: 6px 14px; border-radius: 999px; border: 1px solid var(--line);
+    background: var(--card);
+  }
+  .badge.play { color: #1a7f37; background: rgba(26,127,55,.12); border-color: rgba(26,127,55,.25); }
+  .badge.pause { color: #b45309; background: rgba(180,83,9,.12); border-color: rgba(180,83,9,.25); }
+  .badge.stop { color: var(--muted); }
+  .spacer { flex: 1; }
+  #token {
+    font-family: ui-monospace, monospace; font-size: 12px;
+    background: var(--card); border: 1px solid var(--line); border-radius: 999px;
+    padding: 8px 14px; color: var(--ink); outline: none;
+  }
+  .actions { display: flex; gap: 10px; }
+  button {
+    border: 0; cursor: pointer; font-weight: 800; font-size: 14px;
+    padding: 10px 18px; border-radius: 999px; color: #fff;
+    transition: transform .12s ease, box-shadow .12s ease, filter .12s ease;
+  }
+  button:hover { transform: translateY(-1px); filter: brightness(1.05); }
+  button:active { transform: translateY(0); }
+  #push { background: linear-gradient(120deg, var(--mpd), #b967ff); box-shadow: 0 8px 20px -8px rgba(240,80,110,.55); }
+  #pull { background: linear-gradient(120deg, var(--nav), #06b6d4); box-shadow: 0 8px 20px -8px rgba(79,70,229,.55); }
+
+  .beam { height: 4px; border-radius: 999px; margin-bottom: 22px;
+    background: linear-gradient(90deg, var(--mpd), #b967ff, var(--nav), #06b6d4); }
+
+  /* now playing hero */
+  .hero {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 0;
+    border-radius: 26px; overflow: hidden; margin-bottom: 22px;
+    background: linear-gradient(120deg, #f0506e 0%, #b967ff 55%, #4f46e5 100%);
+    color: #fff; box-shadow: 0 20px 50px -20px rgba(120, 60, 200, .55);
+  }
+  .hero .side { padding: clamp(18px, 3vw, 30px); min-width: 0; }
+  .hero .side + .side { border-left: 1px solid rgba(255,255,255,.25); }
+  .hero .kicker { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .14em; opacity: .8; margin-bottom: 8px; }
+  .hero .title { font-size: clamp(18px, 3vw, 26px); font-weight: 900; letter-spacing: -0.02em; line-height: 1.15;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .hero .meta { font-size: 13px; opacity: .85; margin-top: 6px; }
+  .hero .pos { font-family: ui-monospace, monospace; font-size: 12px; opacity: .75; margin-top: 8px; }
+  .hero .empty { opacity: .6; font-style: italic; }
+
+  .meta-row { display: flex; gap: 18px; flex-wrap: wrap; font-size: 12.5px; color: var(--muted); margin: 0 4px 14px; }
+  .meta-row b { color: var(--ink); }
+
+  /* columns */
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 22px;
+    overflow: hidden; backdrop-filter: blur(8px);
+    box-shadow: 0 12px 34px -22px rgba(23,21,31,.35);
+  }
+  .card .accent { height: 6px; }
+  .card.mpd .accent { background: linear-gradient(90deg, var(--mpd), #ffb199); }
+  .card.nav .accent { background: linear-gradient(90deg, var(--nav), #22d3ee); }
+  .card h2 {
+    margin: 0; padding: 16px 18px 12px; font-size: 13px; font-weight: 900;
+    text-transform: uppercase; letter-spacing: .14em;
+  }
+  .card.mpd h2 { color: var(--mpd); }
+  .card.nav h2 { color: var(--nav); }
+
+  ul { list-style: none; margin: 0; padding: 0 0 8px; max-height: 46vh; overflow-y: auto; }
+  li {
+    display: flex; align-items: baseline; gap: 12px;
+    padding: 9px 18px; border-top: 1px solid var(--line);
+    transition: background .12s ease;
+  }
+  li:hover { background: rgba(23,21,31,.035); }
+  li .idx { font-family: ui-monospace, monospace; font-weight: 800; font-size: 13px; min-width: 26px; }
+  .card.mpd li .idx { color: var(--mpd); }
+  .card.nav li .idx { color: var(--nav); }
+  li .body { min-width: 0; flex: 1; }
+  li .t { font-weight: 700; font-size: 14.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  li .a { font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  li .p { font-family: ui-monospace, monospace; font-size: 11px; color: var(--muted); opacity: .7;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* current song */
+  li::before {
+    content: ""; align-self: center; width: 8px; height: 8px; border-radius: 50%;
+    flex-shrink: 0; background: transparent;
+  }
+  li.current { background: var(--mpd-tint); }
+  .card.nav li.current { background: var(--nav-tint); }
+  li.current::before {
+    background: var(--mpd); animation: pulse 1.6s ease-in-out infinite;
+  }
+  .card.nav li.current::before { background: var(--nav); }
+  @keyframes pulse { 0%,100% { opacity: 1; transform: scale(1);} 50% { opacity: .4; transform: scale(.75);} }
+
+  #msg { margin-top: 14px; font-size: 13px; color: var(--muted); min-height: 18px; }
+  #msg.ok { color: #1a7f37; }
+  #msg.err { color: #dc2626; }
+
+  @media (max-width: 860px) {
+    .hero, .cols { grid-template-columns: 1fr; }
+    .hero .side + .side { border-left: 0; border-top: 1px solid rgba(255,255,255,.25); }
+  }
 </style>
 </head>
 <body>
-  <div class="row">
-    <h1>baton</h1>
+<div class="wrap">
+  <header>
+    <h1 class="wordmark"><span class="dot"></span>baton</h1>
     <span id="state" class="badge">…</span>
-    <input id="token" type="password" placeholder="API token (optional)" style="background:#1c1c1c;border:1px solid #333;border-radius:6px;color:#eee;padding:6px 10px;font-size:13px;">
-    <span style="flex:1"></span>
-    <button id="push">⇧ Push to Navidrome</button>
-    <button id="pull">⇩ Pull from Navidrome</button>
+    <span class="spacer"></span>
+    <input id="token" type="password" placeholder="api token (optional)" autocomplete="off">
+    <div class="actions">
+      <button id="pull">⇩ Pull from Navidrome</button>
+      <button id="push">⇧ Push to Navidrome</button>
+    </div>
+  </header>
+  <div class="beam"></div>
+
+  <section class="hero">
+    <div class="side">
+      <div class="kicker">MPD</div>
+      <div id="hcur-mpd" class="title empty">…</div>
+      <div id="hmeta-mpd" class="meta"></div>
+      <div id="hpos-mpd" class="pos"></div>
+    </div>
+    <div class="side">
+      <div class="kicker">Navidrome</div>
+      <div id="hcur-nav" class="title empty">…</div>
+      <div id="hmeta-nav" class="meta"></div>
+      <div id="hpos-nav" class="pos"></div>
+    </div>
+  </section>
+
+  <div class="meta-row">
+    <span>mode <b id="m-mode">—</b></span>
+    <span>remote changed <b id="m-changed">—</b></span>
+    <span>last push <b id="m-push">—</b></span>
   </div>
 
-  <div class="card">
-    <strong>Current song</strong>
-    <div id="current" class="meta">…</div>
-    <div id="position" class="meta">…</div>
-    <div id="meta" class="meta">…</div>
-  </div>
-
-  <div class="card">
-    <strong>Queue</strong>
-    <ul id="queue"></ul>
+  <div class="cols">
+    <div class="card mpd">
+      <div class="accent"></div>
+      <h2>MPD queue</h2>
+      <ul id="queue"></ul>
+    </div>
+    <div class="card nav">
+      <div class="accent"></div>
+      <h2>Navidrome queue</h2>
+      <ul id="remotequeue"></ul>
+    </div>
   </div>
 
   <div id="msg"></div>
+</div>
 
 <script>
 const $ = s => document.querySelector(s);
 let data = null;
 
-// optional bearer token for the API, remembered across reloads
 const TOKEN_KEY = 'baton_token';
 $('#token').value = localStorage.getItem(TOKEN_KEY) || '';
-$('#token').addEventListener('input', e => {
-  localStorage.setItem(TOKEN_KEY, e.target.value.trim());
-});
-
+$('#token').addEventListener('input', e => localStorage.setItem(TOKEN_KEY, e.target.value.trim()));
 function headers() {
   const t = localStorage.getItem(TOKEN_KEY) || '';
   return t ? { 'Authorization': 'Bearer ' + t } : {};
 }
 
-function badge(state) {
-  return `<span class="badge ${state}">${state}</span>`;
+function esc(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; }
+function fmt(ms) { return ms == null ? '' : (ms/1000).toFixed(1) + 's'; }
+
+function hero(side, entry, pos, fallback) {
+  $(`#hcur-${side}`).textContent = entry && entry.title ? entry.title : fallback;
+  $(`#hcur-${side}`).classList.toggle('empty', !(entry && entry.title));
+  const meta = [];
+  if (entry && entry.artist) meta.push(entry.artist);
+  if (entry && entry.album) meta.push(entry.album);
+  $(`#hmeta-${side}`).textContent = meta.join(' · ');
+  $(`#hpos-${side}`).textContent = fmt(pos);
 }
 
 function render() {
   $('#state').textContent = data.mpd_state || 'unknown';
   $('#state').className = 'badge ' + (data.mpd_state || '');
-  $('#current').textContent = data.current_song || '(none)';
-  $('#position').textContent = data.position_ms != null ? (data.position_ms/1000).toFixed(1) + 's' : '';
-  $('#meta').innerHTML =
-    `mode: ${data.mode || ''} &nbsp; remote changed: ${data.remote_changed || '-'} &nbsp; last push: ${data.last_push_ts || '-'}`;
 
-  const ul = $('#queue');
-  ul.innerHTML = '';
-  (data.queue || []).forEach((f, i) => {
+  // now playing
+  hero('mpd', data.current, data.position_ms, 'nothing playing');
+  const navCur = (data.remote_queue || []).find(e => e.id === data.remote_current);
+  hero('nav', navCur, data.remote_position_ms, 'no queue');
+
+  $('#m-mode').textContent = data.mode || '-';
+  $('#m-changed').textContent = data.remote_changed || '-';
+  $('#m-push').textContent = data.last_push_ts || 'never';
+
+  // MPD queue
+  const q = $('#queue'); q.innerHTML = '';
+  (data.queue || []).forEach((e, i) => {
     const li = document.createElement('li');
-    if (f === data.current_song) li.className = 'current';
-    li.textContent = `${i+1}. ${f}`;
-    ul.appendChild(li);
+    if (data.current && e.file === data.current.file) li.className = 'current';
+    li.innerHTML = `<span class="idx">${i+1}</span><div class="body">` +
+      `<div class="t">${esc(e.title || e.file)}</div>` +
+      `<div class="a">${esc([e.artist, e.album].filter(Boolean).join(' · '))}</div>` +
+      `<div class="p">${esc(e.file)}</div></div>`;
+    q.appendChild(li);
   });
+
+  // Navidrome queue
+  const rq = $('#remotequeue'); rq.innerHTML = '';
+  (data.remote_queue || []).forEach((e, i) => {
+    const li = document.createElement('li');
+    if (e.id === data.remote_current) li.className = 'current';
+    li.innerHTML = `<span class="idx">${i+1}</span><div class="body">` +
+      `<div class="t">${esc(e.title)}</div>` +
+      `<div class="a">${esc([e.artist, e.album].filter(Boolean).join(' · '))}</div></div>`;
+    rq.appendChild(li);
+  });
+  if (!(data.remote_queue || []).length) {
+    const li = document.createElement('li');
+    li.innerHTML = `<div class="a">(no queue — Navidrome unreachable or empty)</div>`;
+    rq.appendChild(li);
+  }
 }
 
 async function refresh() {
   try {
     const r = await fetch('/api/status', { headers: headers() });
-    if (r.status === 401) { $('#msg').textContent = 'unauthorized: set API token'; return; }
+    if (r.status === 401) { msg('unauthorized: set the API token', 'err'); return; }
     data = await r.json();
     render();
-  } catch (e) {
-    $('#msg').textContent = 'status error: ' + e.message;
-  }
+  } catch (e) { msg('status error: ' + e.message, 'err'); }
+}
+
+function msg(text, cls) {
+  const m = $('#msg');
+  m.textContent = text; m.className = cls || '';
 }
 
 async function act(ep) {
-  $('#msg').textContent = '…';
+  msg('…');
   try {
     const r = await fetch(ep, { method: 'POST', headers: headers() });
-    if (r.status === 401) { $('#msg').textContent = 'unauthorized: set API token'; return; }
+    if (r.status === 401) { msg('unauthorized: set the API token', 'err'); return; }
     const j = await r.json();
-    $('#msg').textContent = j.status || 'ok';
-  } catch (e) {
-    $('#msg').textContent = 'error: ' + e.message;
-  }
+    msg((j && j.status) || 'ok', 'ok');
+  } catch (e) { msg('error: ' + e.message, 'err'); }
   refresh();
 }
 

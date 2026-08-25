@@ -152,11 +152,13 @@ Use the **same Navidrome account** as your music clients so they all share one q
 
 ## Web UI & API
 
-The binary embeds a tiny web UI (single page, no build step) served at the `BATON_LISTEN`
-address. It shows MPD state, the current song + position, the full queue, and has **Push** and
-**Pull** buttons for manual sync.
+The binary embeds a web UI (single page, no build step) served at the `BATON_LISTEN`
+address: a **Now playing** bar showing both the current MPD and Navidrome songs, side-by-side
+**MPD** and **Navidrome** queue columns (tagged entries, current song highlighted, one column
+on mobile), and **Push** / **Pull** buttons for manual sync.
 
-- `GET /api/status` — MPD state, current song, position, queue, remote `changed`, last push.
+- `GET /api/status` — MPD state, current song + position, the full MPD queue (tagged), the
+  Navidrome queue (`remote_queue` with title/artist/album/track), remote `changed`, last push.
 - `POST /api/push` — force a push now.
 - `POST /api/pull` — force a pull now.
 
