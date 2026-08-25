@@ -10,6 +10,12 @@ another device that reads and writes that queue, keeping everyone in sync. A sin
 statically-linked binary with no dependencies; runs as a systemd service, a container, or a
 one-shot process.
 
+> **⚠️ Requirement: MPD and Navidrome must read the SAME music library.**
+> baton matches songs between the two by tag (`title`/`album`/`artist`/`track`/`disc`). That
+> only works because both servers index the *same* files on disk. If MPD's `music_directory`
+> and Navidrome's music folder point at different locations, songs won't resolve and sync will
+> silently fail.
+
 ## How it works
 
 Two sync directions, both driven by polling every `POLL_INTERVAL` seconds (Navidrome has no
@@ -84,17 +90,25 @@ make test       # go test ./...
 
 ## Configuration
 
-On first interactive run with no config present, baton writes a commented template to
-`~/.config/baton/baton.env` and asks you to fill it in. Or pass one explicitly:
+baton reads configuration from three places, in precedence order: **CLI flags, environment
+variables, and an optional `--env-file`**. There's no magic config location — you point it at a
+file explicitly, or set the keys directly.
 
 ```sh
 cp .env.example mybaton.env   # edit NAVIDROME_USER / NAVIDROME_PASSWORD
 baton --env-file mybaton.env
 ```
 
-Config is discovered as: `--env-file PATH` → `$BATON_ENV_FILE` → `~/.config/baton/baton.env`.
-Precedence: **CLI flag > environment variable > config file > built-in default**. All keys can
-also be given as flags (`baton --navidrome-user me --navidrome-password secret`).
+Or skip the file entirely:
+
+```sh
+NAVIDROME_USER=me NAVIDROME_PASSWORD=secret baton
+baton --navidrome-user me --navidrome-password secret
+```
+
+The systemd install provisions a config at `/etc/baton/baton.env`, injected via the unit's
+`EnvironmentFile`; non-root users just point `--env-file` at any file they own. A missing
+`--env-file` path is a hard error.
 
 Use the **same Navidrome account** as your music clients so they all share one queue.
 

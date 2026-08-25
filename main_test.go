@@ -2,8 +2,6 @@ package main
 
 import (
 	"os"
-	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 )
@@ -112,63 +110,16 @@ BATON_LISTEN=127.0.0.1:9999
 }
 
 func TestReadDotenvMissing(t *testing.T) {
-	cfg, err := readDotenv(t.TempDir() + "/nope.env")
+	// empty path = no config file, not an error
+	cfg, err := readDotenv("")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(cfg) != 0 {
 		t.Errorf("expected empty map, got %v", cfg)
 	}
-}
-
-func TestFindConfigPath(t *testing.T) {
-	// explicit flag wins
-	if p := findConfigPath("/explicit.env"); p != "/explicit.env" {
-		t.Errorf("flag path: %q", p)
-	}
-	// env var wins over user path
-	t.Setenv("BATON_ENV_FILE", "/env-var.env")
-	if p := findConfigPath(""); p != "/env-var.env" {
-		t.Errorf("env var path: %q", p)
-	}
-	// user config path used if it exists
-	dir := t.TempDir()
-	existing := dir + "/baton.env"
-	os.WriteFile(existing, []byte("A=1\n"), 0o600)
-	t.Setenv("XDG_CONFIG_HOME", dir+"/xdg")
-	os.MkdirAll(dir+"/xdg/baton", 0o755)
-	os.WriteFile(dir+"/xdg/baton/baton.env", []byte("B=2\n"), 0o600)
-	t.Setenv("BATON_ENV_FILE", "")
-	if p := findConfigPath(""); p != dir+"/xdg/baton/baton.env" {
-		t.Errorf("user config path: %q", p)
-	}
-	// nothing found -> ""
-	t.Setenv("XDG_CONFIG_HOME", dir+"/empty-xdg")
-	if p := findConfigPath(""); p != "" {
-		t.Errorf("expected no config, got %q", p)
-	}
-}
-
-func TestUserConfigPath(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", "/tmp/xdg")
-	if p := userConfigPath(); p != "/tmp/xdg/baton/baton.env" {
-		t.Errorf("xdg path: %q", p)
-	}
-}
-
-func TestWriteDefaultConfig(t *testing.T) {
-	p := filepath.Join(t.TempDir(), "baton", "baton.env")
-	if err := writeDefaultConfig(p); err != nil {
-		t.Fatal(err)
-	}
-	data, err := os.ReadFile(p)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(data), "NAVIDROME_USER=") {
-		t.Errorf("default config missing NAVIDROME_USER:\n%s", data)
-	}
-	if !strings.Contains(string(data), "BATON_LISTEN=127.0.0.1:8080") {
-		t.Errorf("default config missing BATON_LISTEN:\n%s", data)
+	// explicit missing file = error
+	if _, err := readDotenv(t.TempDir() + "/nope.env"); err == nil {
+		t.Fatal("expected error for missing --env-file")
 	}
 }

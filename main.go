@@ -22,42 +22,11 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
-
-// defaultConfig is the template written to the user config path on first run.
-// Keep it in sync with .env.example.
-const defaultConfig = `# baton configuration (generated on first run — edit and restart baton)
-#
-# baton never reads your music files. It matches songs by tag through MPD and
-# Navidrome, so you only configure how to reach them.
-
-# Navidrome account baton authenticates as. Use the SAME account as your music
-# clients (Feishin, Tempo, Tempus, Resonus, Malp...) so they share one queue.
-NAVIDROME_USER=
-NAVIDROME_PASSWORD=
-NAVIDROME_URL=http://127.0.0.1:4533
-# Set to 1 if your server only supports legacy plaintext auth (not Navidrome).
-NAVIDROME_LEGACY_AUTH=0
-
-# MPD host/port/password.
-MPD_HOST=127.0.0.1
-MPD_PORT=6600
-MPD_PASSWORD=
-
-# Poll interval (seconds) and sync mode: auto|manual|push|pull.
-POLL_INTERVAL=5
-MODE=auto
-
-# Status API + web UI listen address.
-BATON_LISTEN=127.0.0.1:8080
-# Optional bearer token protecting /api/*. Leave empty for no auth.
-BATON_API_TOKEN=
-`
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -79,7 +48,7 @@ type Config struct {
 }
 
 // readDotenv loads a dotenv-style config file (KEY=VALUE lines, # comments)
-// into a map. A missing file is not an error; an unreadable one is.
+// into a map. An empty path means "no config file"; a missing file is an error.
 func readDotenv(path string) (map[string]string, error) {
 	cfg := map[string]string{}
 	if path == "" {
@@ -87,9 +56,6 @@ func readDotenv(path string) (map[string]string, error) {
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return cfg, nil
-		}
 		return nil, err
 	}
 	for _, raw := range strings.Split(string(data), "\n") {
@@ -112,53 +78,6 @@ func readDotenv(path string) (map[string]string, error) {
 	return cfg, nil
 }
 
-// findConfigPath resolves the config file to load. Precedence: explicit
-// --env-file flag, then $BATON_ENV_FILE, then the user config path if it
-// already exists. Returns "" when no config file is in play.
-func findConfigPath(flagPath string) string {
-	if flagPath != "" {
-		return flagPath
-	}
-	if v := os.Getenv("BATON_ENV_FILE"); v != "" {
-		return v
-	}
-	if p := userConfigPath(); p != "" {
-		if _, err := os.Stat(p); err == nil {
-			return p
-		}
-	}
-	return ""
-}
-
-// userConfigPath returns ~/.config/baton/baton.env (XDG-aware).
-func userConfigPath() string {
-	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
-		return filepath.Join(xdg, "baton", "baton.env")
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(home, ".config", "baton", "baton.env")
-}
-
-// writeDefaultConfig seeds a commented template the user can edit.
-func writeDefaultConfig(path string) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(path, []byte(defaultConfig), 0o600)
-}
-
-// interactive reports whether stdin looks like a terminal (vs a daemon/pipe).
-func interactive() bool {
-	fi, err := os.Stdin.Stat()
-	if err != nil {
-		return false
-	}
-	return fi.Mode()&os.ModeCharDevice != 0
-}
-
 func loadConfig() Config {
 	var envFile string
 	flag.StringVar(&envFile, "env-file", "", "path to a dotenv-style config file (KEY=VALUE)")
@@ -176,9 +95,9 @@ func loadConfig() Config {
 	flag.BoolVar(&cVerbose, "verbose", false, "verbose debug logging")
 	flag.Parse()
 
-	cfg, err := readDotenv(findConfigPath(envFile))
+	cfg, err := readDotenv(envFile)
 	if err != nil {
-		log.Fatalf("cannot read config file: %v", err)
+		log.Fatalf("cannot read config file %q: %v", envFile, err)
 	}
 
 	// Precedence: explicit flag > environment > config file > built-in default.
@@ -1243,17 +1162,8 @@ func main() {
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 
 	if cfg.NavidromeUser == "" || cfg.NavidromePass == "" {
-		if interactive() && findConfigPath("") == "" {
-			p := userConfigPath()
-			if err := writeDefaultConfig(p); err != nil {
-				log.Fatalf("could not write default config to %s: %v", p, err)
-			}
-			log.Fatalf("Created a default config at %s. Edit it to set "+
-				"NAVIDROME_USER / NAVIDROME_PASSWORD (and optionally the port), "+
-				"then run baton again.", p)
-		}
-		log.Fatal("NAVIDROME_USER and NAVIDROME_PASSWORD are required (set them in " +
-			"the config file, as environment variables, or with --env-file)")
+		log.Fatal("NAVIDROME_USER and NAVIDROME_PASSWORD are required. Set them in " +
+			"your --env-file, as environment variables, or with --navidrome-user/--navidrome-password.")
 	}
 	if cfg.PollInterval <= 0 {
 		cfg.PollInterval = 5 * time.Second
