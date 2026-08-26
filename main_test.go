@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -137,5 +138,39 @@ func TestReadDotenvMissing(t *testing.T) {
 	// explicit missing file = error
 	if _, err := readDotenv(t.TempDir() + "/nope.env"); err == nil {
 		t.Fatal("expected error for missing --env-file")
+	}
+}
+
+func TestEngineMode(t *testing.T) {
+	dir := t.TempDir()
+	stateFile := dir + "/baton/mode"
+
+	// defaults to manual, persists on set
+	e := NewSyncEngine(nil, nil, Config{StateFile: stateFile})
+	if got := e.getMode(); got != "manual" {
+		t.Fatalf("default mode = %q, want manual", got)
+	}
+	if err := e.setMode("push"); err != nil {
+		t.Fatal(err)
+	}
+	if got := e.getMode(); got != "push" {
+		t.Fatalf("mode after set = %q, want push", got)
+	}
+	if b, err := os.ReadFile(stateFile); err != nil || strings.TrimSpace(string(b)) != "push" {
+		t.Fatalf("persisted state = %q err=%v, want push", b, err)
+	}
+
+	// a new engine restores it from disk
+	e2 := NewSyncEngine(nil, nil, Config{StateFile: stateFile})
+	if got := e2.getMode(); got != "push" {
+		t.Fatalf("restored mode = %q, want push", got)
+	}
+
+	// invalid modes are rejected and don't clobber state
+	if err := e.setMode("nope"); err == nil {
+		t.Fatal("expected error for invalid mode")
+	}
+	if got := e.getMode(); got != "push" {
+		t.Fatalf("mode changed on invalid set = %q, want push", got)
 	}
 }

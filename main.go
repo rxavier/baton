@@ -22,9 +22,11 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -41,8 +43,8 @@ type Config struct {
 	MPDPort         int
 	MPDPassword     string
 	PollInterval    time.Duration
-	Mode            string // auto | manual | push | pull
 	Listen          string
+	StateFile       string // where the runtime mode is persisted
 	APIToken        string
 	Verbose         bool
 }
@@ -89,9 +91,9 @@ func loadConfig() Config {
 	mpdPort := flag.Int("mpd-port", 0, "MPD port")
 	flag.StringVar(&cMpdPass, "mpd-password", "", "MPD password")
 	poll := flag.Float64("poll-interval", 0, "poll interval seconds")
-	flag.StringVar(&cMode, "mode", "", "sync mode: auto|manual|push|pull")
 	flag.StringVar(&cListen, "listen", "", "status API + web UI listen address")
 	flag.StringVar(&cToken, "api-token", "", "optional bearer token for the API")
+	flag.StringVar(&cStateFile, "state-file", "", "file where the runtime sync mode is persisted")
 	flag.BoolVar(&cVerbose, "verbose", false, "verbose debug logging")
 	flag.Parse()
 
@@ -161,16 +163,36 @@ func loadConfig() Config {
 	c.MPDPort = pickInt("mpd-port", "MPD_PORT", *mpdPort, 6600)
 	c.MPDPassword = pick("mpd-password", "MPD_PASSWORD", cMpdPass, "")
 	c.PollInterval = time.Duration(pickFloat("poll-interval", "POLL_INTERVAL", *poll, 5) * float64(time.Second))
-	c.Mode = pick("mode", "MODE", cMode, "auto")
 	c.Listen = pick("listen", "BATON_LISTEN", cListen, "127.0.0.1:8080")
 	c.APIToken = pick("api-token", "BATON_API_TOKEN", cToken, "")
 	c.Verbose = pickBool("verbose", "VERBOSE")
+	if c.StateFile == "" {
+		c.StateFile = defaultStateFile()
+	}
 	return c
 }
 
+// defaultStateFile returns where baton persists the runtime sync mode, following
+// the XDG state convention. Returns "" when no sensible location can be found,
+// which disables persistence (mode still changes, just not across restarts).
+func defaultStateFile() string {
+	if v := os.Getenv("BATON_STATE_FILE"); v != "" {
+		return v
+	}
+	base := os.Getenv("XDG_STATE_HOME")
+	if base == "" {
+		home, err := os.UserHomeDir()
+		if err != nil || home == "" {
+			return ""
+		}
+		base = filepath.Join(home, ".local", "state")
+	}
+	return filepath.Join(base, "baton", "mode")
+}
+
 var (
-	cURL, cUser, cPass, cHost, cMpdPass, cMode, cListen, cToken string
-	cLegacy, cVerbose                                           bool
+	cURL, cUser, cPass, cHost, cMpdPass, cListen, cToken, cStateFile string
+	cLegacy, cVerbose                                                bool
 )
 
 func mustInt(s string) int {
@@ -770,6 +792,9 @@ type SyncEngine struct {
 	lastRemoteSig string
 	lastPushTS    time.Time
 
+	mode      atomic.Value // string: auto|manual|push|pull
+	stateFile string
+
 	mu sync.Mutex
 }
 
@@ -787,13 +812,52 @@ func makeFP(title, artist, album string, track, disc *int) fingerprint {
 }
 
 func NewSyncEngine(sub *Subsonic, m *MPD, cfg Config) *SyncEngine {
-	return &SyncEngine{
-		subsonic: sub,
-		mpd:      m,
-		cfg:      cfg,
-		fpToID:   map[string]string{},
-		idToFile: map[string]string{},
+	e := &SyncEngine{
+		subsonic:  sub,
+		mpd:       m,
+		cfg:       cfg,
+		stateFile: cfg.StateFile,
+		fpToID:    map[string]string{},
+		idToFile:  map[string]string{},
 	}
+	e.mode.Store("manual")
+	if e.stateFile != "" {
+		if data, err := os.ReadFile(e.stateFile); err == nil {
+			if m := strings.TrimSpace(string(data)); validMode(m) {
+				e.mode.Store(m)
+				log.Printf("mode: restored %q from %s", m, e.stateFile)
+			}
+		}
+	}
+	return e
+}
+
+func validMode(m string) bool {
+	switch m {
+	case "auto", "manual", "push", "pull":
+		return true
+	}
+	return false
+}
+
+// getMode returns the current sync mode. Safe to call from any goroutine.
+func (e *SyncEngine) getMode() string { return e.mode.Load().(string) }
+
+// setMode validates and stores a new sync mode, persisting it best-effort.
+func (e *SyncEngine) setMode(m string) error {
+	m = strings.TrimSpace(m)
+	if !validMode(m) {
+		return fmt.Errorf("invalid mode %q (want auto|manual|push|pull)", m)
+	}
+	e.mode.Store(m)
+	if e.stateFile != "" {
+		if err := os.MkdirAll(filepath.Dir(e.stateFile), 0o755); err != nil {
+			log.Printf("mode: cannot create state dir for %s: %v", e.stateFile, err)
+		} else if err := os.WriteFile(e.stateFile, []byte(m+"\n"), 0o644); err != nil {
+			log.Printf("mode: cannot persist %q to %s: %v", m, e.stateFile, err)
+		}
+	}
+	return nil
 }
 
 // dbg logs at INFO when verbose is on, and stays silent otherwise.
@@ -1081,7 +1145,6 @@ var indexHTML string
 
 type APIServer struct {
 	engine *SyncEngine
-	cfg    Config
 	token  string
 }
 
@@ -1096,6 +1159,7 @@ func (a *APIServer) handler() http.Handler {
 		io.WriteString(w, indexHTML)
 	})
 	mux.HandleFunc("/api/status", a.auth(a.status))
+	mux.HandleFunc("/api/mode", a.auth(a.setMode))
 	mux.HandleFunc("/api/push", a.auth(a.push))
 	mux.HandleFunc("/api/pull", a.auth(a.pull))
 	return mux
@@ -1162,7 +1226,7 @@ func (a *APIServer) status(w http.ResponseWriter, r *http.Request) {
 	st := statusResponse{
 		MPDState:   a.engine.mpd.state(),
 		PositionMs: a.engine.mpd.elapsedMs(),
-		Mode:       a.cfg.Mode,
+		Mode:       a.engine.getMode(),
 	}
 	if cur := a.engine.mpd.currentsong(); cur["file"] != nil {
 		e := toMPDEntry(cur)
@@ -1196,6 +1260,26 @@ func (a *APIServer) status(w http.ResponseWriter, r *http.Request) {
 func (a *APIServer) push(w http.ResponseWriter, r *http.Request) {
 	a.engine.pushQueue()
 	writeJSON(w, map[string]string{"status": "ok"})
+}
+
+func (a *APIServer) setMode(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var body struct {
+		Mode string `json:"mode"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "bad json", http.StatusBadRequest)
+		return
+	}
+	if err := a.engine.setMode(body.Mode); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, map[string]string{"status": "ok", "mode": a.engine.getMode()})
 }
 
 func (a *APIServer) pull(w http.ResponseWriter, r *http.Request) {
@@ -1237,7 +1321,7 @@ func main() {
 	engine.seedBaseline()
 
 	// API + web UI
-	api := &APIServer{engine: engine, cfg: cfg, token: cfg.APIToken}
+	api := &APIServer{engine: engine, token: cfg.APIToken}
 	srv := &http.Server{
 		Addr:    cfg.Listen,
 		Handler: api.handler(),
@@ -1252,7 +1336,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	log.Printf("Starting baton (mode=%s, poll=%s)", cfg.Mode, cfg.PollInterval)
+	log.Printf("Starting baton (mode=%s, poll=%s)", engine.getMode(), cfg.PollInterval)
 	ticker := time.NewTicker(cfg.PollInterval)
 	defer ticker.Stop()
 	for {
@@ -1267,11 +1351,11 @@ func main() {
 			if !sub.Ping() {
 				log.Printf("Navidrome unreachable; retrying")
 			}
-			switch cfg.Mode {
+			switch engine.getMode() {
 			case "auto", "push":
 				engine.pushQueue()
 			}
-			if cfg.Mode == "auto" || cfg.Mode == "pull" {
+			if m := engine.getMode(); m == "auto" || m == "pull" {
 				engine.pullQueue()
 			}
 		}

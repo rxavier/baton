@@ -17,8 +17,13 @@ services:
       NAVIDROME_PASSWORD: ${NAVIDROME_PASSWORD:?set in .env}
       NAVIDROME_LEGACY_AUTH: ${NAVIDROME_LEGACY_AUTH:-0}
       POLL_INTERVAL: ${POLL_INTERVAL:-5}
-      MODE: ${MODE:-auto}
       BATON_LISTEN: ${BATON_LISTEN:-0.0.0.0:8080}
       BATON_API_TOKEN: ${BATON_API_TOKEN:-}
+      # Optional: persist the sync mode chosen in the web UI across container
+      # recreates. Mount a volume and set BATON_STATE_FILE to a path inside it:
+      #   volumes:
+      #     - ./baton-state:/var/lib/baton
+      #   environment:
+      #     BATON_STATE_FILE: /var/lib/baton/mode
     ports:
       - "${BATON_PORT:-8080}:8080"

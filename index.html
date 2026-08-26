@@ -90,6 +90,11 @@
 
   .meta-row { display: flex; gap: 18px; flex-wrap: wrap; font-size: 12.5px; color: var(--muted); margin: 0 4px 14px; }
   .meta-row b { color: var(--ink); }
+  #m-mode {
+    font: inherit; font-weight: 700; color: var(--ink);
+    background: var(--card); border: 1px solid var(--line); border-radius: 999px;
+    padding: 2px 8px; cursor: pointer; outline: none;
+  }
 
   /* columns */
   .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
@@ -177,7 +182,12 @@
   </section>
 
   <div class="meta-row">
-    <span>mode <b id="m-mode">—</b></span>
+    <span>mode <select id="m-mode" aria-label="sync mode">
+      <option value="auto">auto</option>
+      <option value="manual">manual</option>
+      <option value="push">push</option>
+      <option value="pull">pull</option>
+    </select></span>
     <span>remote changed <b id="m-changed">—</b></span>
     <span>last push <b id="m-push">—</b></span>
   </div>
@@ -232,7 +242,7 @@ function render() {
   const navCur = (data.remote_queue || []).find(e => e.id === data.remote_current);
   hero('nav', navCur, data.remote_position_ms, 'no queue');
 
-  $('#m-mode').textContent = data.mode || '-';
+  $('#m-mode').value = data.mode || 'manual';
   $('#m-changed').textContent = data.remote_changed || '-';
   $('#m-push').textContent = data.last_push_ts || 'never';
 
@@ -292,6 +302,22 @@ async function act(ep) {
 
 $('#push').addEventListener('click', () => act('/api/push'));
 $('#pull').addEventListener('click', () => act('/api/pull'));
+
+$('#m-mode').addEventListener('change', async e => {
+  const mode = e.target.value;
+  msg('…');
+  try {
+    const r = await fetch('/api/mode', {
+      method: 'POST',
+      headers: Object.assign({ 'Content-Type': 'application/json' }, headers()),
+      body: JSON.stringify({ mode })
+    });
+    if (r.status === 401) { msg('unauthorized: set the API token', 'err'); return; }
+    if (!r.ok) { msg('mode error: ' + (await r.text()), 'err'); return; }
+    msg('mode set to ' + mode, 'ok');
+  } catch (err) { msg('mode error: ' + err.message, 'err'); }
+  refresh();
+});
 
 refresh();
 setInterval(refresh, 3000);

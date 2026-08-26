@@ -138,29 +138,37 @@ Use the **same Navidrome account** as your music clients so they all share one q
 | `MPD_PORT`              | `6600`                  | MPD port                                       |
 | `MPD_PASSWORD`          | —                       | Optional MPD password                          |
 | `POLL_INTERVAL`         | `5`                     | Poll interval (seconds) for both directions    |
-| `MODE`                  | `auto`                  | `auto`/`manual`/`push`/`pull` sync behavior    |
 | `BATON_LISTEN`          | `127.0.0.1:8080`        | Status API + web UI address                    |
 | `BATON_API_TOKEN`       | —                       | Optional bearer token for the API              |
+| `BATON_STATE_FILE`      | `~/.local/state/baton/mode` | Where the runtime sync mode is persisted   |
 
 ### Sync modes
 
-- `auto` — push and pull on the poll ticker (default).
+- `auto` — push and pull on the poll ticker.
 - `push` / `pull` — only that direction on the ticker.
 - `manual` — no automatic sync; sync only when `POST /api/push` or `POST /api/pull` is called.
   Useful for a dev instance running alongside the production service, or for a "press a button
   when I want it" workflow.
+
+The mode defaults to `manual` at startup and is **set from the web UI** (the dropdown in the
+header), not from config — there is no `MODE` env var. The current mode is persisted to
+`BATON_STATE_FILE` on every change and restored on startup, so it survives restarts; if that
+file can't be written (e.g. an unwritable location, or Docker without a mounted volume) baton
+still switches mode, it just doesn't survive a restart.
 
 ## Web UI & API
 
 The binary embeds a web UI (single page, no build step) served at the `BATON_LISTEN`
 address: a **Now playing** bar showing both the current MPD and Navidrome songs, side-by-side
 **MPD** and **Navidrome** queue columns (tagged entries, current song highlighted, one column
-on mobile), and **Push** / **Pull** buttons for manual sync.
+on mobile), **Push** / **Pull** buttons for manual sync, and a **mode** dropdown.
 
 - `GET /api/status` — MPD state, current song + position, the full MPD queue (tagged), the
   Navidrome queue (`remote_queue` with title/artist/album/track), remote `changed`, last push.
 - `POST /api/push` — force a push now.
 - `POST /api/pull` — force a pull now.
+- `POST /api/mode` — `{"mode":"auto|manual|push|pull"}` to switch sync mode at runtime
+  (persisted to `BATON_STATE_FILE`).
 
 When `BATON_API_TOKEN` is set, `/api/*` requires `Authorization: Bearer <token>` (the UI has a
 token field so it still works).
