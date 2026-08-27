@@ -187,9 +187,15 @@ token field so it still works).
   newer than the last successful push, so an older remote queue never clobbers newer MPD state.
   Conservative by design — under clock skew a genuinely-new remote queue may occasionally be
   skipped rather than clobbering.
+- **Tag matching includes duration.** MPD→Navidrome resolution and Navidrome→MPD lookup compare
+  title/artist/album/track/disc *and* duration (±2s), so two versions of the same song can't be
+  confused with each other.
 - **Position restore ends in pause.** MPD drops the intra-song position on `stop`, so restoring
   a position leaves MPD paused. Trade-off: a position-restoring pull shows `paused` instead of
   `stopped`.
+- **Rate-limit friendly.** The web UI's `/api/status` serves the Navidrome queue from a cache
+  refreshed at most every 10s (or by the poll loop), instead of calling `getPlayQueue` on every
+  3s page poll.
 
 ## Development & testing
 

@@ -118,7 +118,7 @@ func (a *APIServer) status(w http.ResponseWriter, r *http.Request) {
 		st.LastPushTS = a.engine.lastPushTS.Format(time.RFC3339)
 	}
 	a.engine.mu.Unlock()
-	if pq, err := a.engine.subsonic.GetPlayQueue(); err == nil && pq != nil {
+	if pq, err := a.engine.getRemoteQueue(); err == nil && pq != nil {
 		st.RemoteChanged = pq.Changed
 		st.RemoteCurrent = pq.Current
 		for _, e := range pq.Entry {

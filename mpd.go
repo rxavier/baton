@@ -268,7 +268,7 @@ func quoteArg(s string) string {
 	return "\"" + s + "\""
 }
 
-func (m *MPD) findFile(title, artist, album string, track, disc *int) string {
+func (m *MPD) findFile(title, artist, album string, track, disc, duration *int) string {
 	candidates := m.find(map[string]string{"album": album, "title": title})
 	if len(candidates) == 0 && artist != "" {
 		candidates = m.find(map[string]string{"album": album, "artist": artist, "title": title})
@@ -284,6 +284,12 @@ func (m *MPD) findFile(title, artist, album string, track, disc *int) string {
 		}
 		if disc != nil {
 			if d, ok := normInt(s["disc"]); ok && d != *disc {
+				continue
+			}
+		}
+		if duration != nil {
+			// +-2s tolerance: decoders may round the same file differently
+			if d, ok := normInt(s["time"]); ok && (d < *duration-2 || d > *duration+2) {
 				continue
 			}
 		}

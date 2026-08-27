@@ -31,20 +31,34 @@ type SyncEngine struct {
 	mode      atomic.Value // string: auto|manual|push|pull
 	stateFile string
 
+	// serializes push/pull so the poll loop and API handlers can't race
+	syncMu sync.Mutex
+
+	// remote queue cache so UI clients don't hammer Navidrome on every poll
+	remoteMu  sync.Mutex
+	remotePq  *PlayQueue
+	remoteTS  time.Time
+	remoteTTL time.Duration
+
 	mu sync.Mutex
 }
 
+const defaultRemoteTTL = 10 * time.Second
+
 type fingerprint string
 
-func makeFP(title, artist, album string, track, disc *int) fingerprint {
-	t, d := 0, 0
+func makeFP(title, artist, album string, track, disc, duration *int) fingerprint {
+	t, d, dur := 0, 0, 0
 	if track != nil {
 		t = *track
 	}
 	if disc != nil {
 		d = *disc
 	}
-	return fingerprint(fmt.Sprintf("%s\x00%s\x00%s\x00%d\x00%d", title, artist, album, t, d))
+	if duration != nil {
+		dur = *duration
+	}
+	return fingerprint(fmt.Sprintf("%s\x00%s\x00%s\x00%d\x00%d\x00%d", title, artist, album, t, d, dur))
 }
 
 func NewSyncEngine(sub *Subsonic, m *MPD, cfg Config) *SyncEngine {
@@ -53,6 +67,7 @@ func NewSyncEngine(sub *Subsonic, m *MPD, cfg Config) *SyncEngine {
 		mpd:       m,
 		cfg:       cfg,
 		stateFile: cfg.StateFile,
+		remoteTTL: defaultRemoteTTL,
 		fpToID:    map[string]string{},
 		idToFile:  map[string]string{},
 	}
@@ -89,8 +104,15 @@ func (e *SyncEngine) setMode(m string) error {
 	if e.stateFile != "" {
 		if err := os.MkdirAll(filepath.Dir(e.stateFile), 0o755); err != nil {
 			log.Printf("mode: cannot create state dir for %s: %v", e.stateFile, err)
-		} else if err := os.WriteFile(e.stateFile, []byte(m+"\n"), 0o644); err != nil {
+			return nil
+		}
+		// write-then-rename so a crash never leaves a corrupt state file
+		tmp := e.stateFile + ".tmp"
+		if err := os.WriteFile(tmp, []byte(m+"\n"), 0o644); err != nil {
 			log.Printf("mode: cannot persist %q to %s: %v", m, e.stateFile, err)
+		} else if err := os.Rename(tmp, e.stateFile); err != nil {
+			log.Printf("mode: cannot persist %q to %s: %v", m, e.stateFile, err)
+			os.Remove(tmp)
 		}
 	}
 	return nil
@@ -110,6 +132,7 @@ func (e *SyncEngine) resolvePush(song map[string]any) string {
 		strVal(song, "album"),
 		intVal(song, "track"),
 		intVal(song, "disc"),
+		intVal(song, "time"),
 	))
 	if id, ok := e.fpToID[fp]; ok {
 		return id
@@ -119,7 +142,8 @@ func (e *SyncEngine) resolvePush(song map[string]any) string {
 	album := strVal(song, "album")
 	track := intVal(song, "track")
 	disc := intVal(song, "disc")
-	id, err := e.subsonic.ResolveID(title, artist, album, track, disc)
+	duration := intVal(song, "time")
+	id, err := e.subsonic.ResolveID(title, artist, album, track, disc, duration)
 	if err == nil && id != "" {
 		e.fpToID[fp] = id
 	}
@@ -179,7 +203,41 @@ func (e *SyncEngine) seedBaseline() {
 	}
 }
 
+// getRemoteQueue returns the last-known Navidrome queue, refreshing it
+// (single-flight under remoteMu) when the cache is older than remoteTTL. UI
+// clients poll every few seconds, so this caps getPlayQueue traffic instead
+// of hitting Navidrome on every status request.
+func (e *SyncEngine) getRemoteQueue() (*PlayQueue, error) {
+	e.remoteMu.Lock()
+	defer e.remoteMu.Unlock()
+	if e.remotePq != nil && time.Since(e.remoteTS) < e.remoteTTL {
+		return e.remotePq, nil
+	}
+	pq, err := e.subsonic.GetPlayQueue()
+	if err != nil {
+		return e.remotePq, err
+	}
+	e.remotePq = pq
+	e.remoteTS = time.Now()
+	return pq, nil
+}
+
+// setRemoteQueue caches a queue fetched by the sync loop so the UI can serve
+// it without an extra Subsonic call.
+func (e *SyncEngine) setRemoteQueue(pq *PlayQueue) {
+	if pq == nil {
+		return
+	}
+	e.remoteMu.Lock()
+	e.remotePq = pq
+	e.remoteTS = time.Now()
+	e.remoteMu.Unlock()
+}
+
 func (e *SyncEngine) pushQueue() {
+	e.syncMu.Lock()
+	defer e.syncMu.Unlock()
+
 	sig, ok := e.mpdSignature()
 	if !ok {
 		return
@@ -222,15 +280,19 @@ func parseSig(sig string) ([]string, string) {
 }
 
 func (e *SyncEngine) pullQueue() {
+	e.syncMu.Lock()
+	defer e.syncMu.Unlock()
+
 	state := e.mpd.state()
 	if state == "play" {
 		return // never stomp active playback
 	}
 	pq, err := e.subsonic.GetPlayQueue()
-	if err != nil || pq == nil {
+	if err != nil {
 		return
 	}
-	if len(pq.Entry) == 0 {
+	e.setRemoteQueue(pq)
+	if pq == nil || len(pq.Entry) == 0 {
 		return
 	}
 	var remoteFiles []string
@@ -320,7 +382,8 @@ func (e *SyncEngine) resolvePull(entry PlayQueueEntry) string {
 	if entry.Title == "" {
 		return ""
 	}
-	f := e.mpd.findFile(entry.Title, entry.Artist, entry.Album, intPtr(entry.Track), intPtr(entry.DiscNumber))
+	f := e.mpd.findFile(entry.Title, entry.Artist, entry.Album,
+		intPtr(entry.Track), intPtr(entry.DiscNumber), intPtr(int(entry.Duration)))
 	if f != "" {
 		e.idToFile[entry.ID] = f
 	}

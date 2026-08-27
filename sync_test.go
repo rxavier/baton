@@ -21,6 +21,7 @@ import (
 type fakeSong struct {
 	file, title, artist, album string
 	track, disc                int
+	dur                        int
 }
 
 type fakeMPD struct {
@@ -187,6 +188,9 @@ func (f *fakeMPD) cmdSongs(_ string) string {
 		if s.disc != 0 {
 			fmt.Fprintf(&b, "Disc: %d\n", s.disc)
 		}
+		if s.dur != 0 {
+			fmt.Fprintf(&b, "Time: %d\n", s.dur)
+		}
 	}
 	b.WriteString("OK\n")
 	return b.String()
@@ -234,6 +238,9 @@ func (f *fakeMPD) cmdFind(parts []string) string {
 		}
 		fmt.Fprintf(&b, "file: %s\nTitle: %s\nArtist: %s\nAlbum: %s\nTrack: %d\nDisc: %d\n",
 			s.file, s.title, s.artist, s.album, s.track, s.disc)
+		if s.dur != 0 {
+			fmt.Fprintf(&b, "Time: %d\n", s.dur)
+		}
 	}
 	b.WriteString("OK\n")
 	return b.String()
@@ -315,6 +322,7 @@ type fakeNavidrome struct {
 	saved     *PlayQueue
 	searchMap map[string][]PlayQueueEntry // query title -> entries
 	changed   string
+	getCalls  int
 }
 
 func newFakeNavidrome() *fakeNavidrome {
@@ -349,6 +357,7 @@ func (n *fakeNavidrome) handler() http.Handler {
 			}
 			out = map[string]any{"status": "ok"}
 		case "getPlayQueue":
+			n.getCalls++
 			if n.saved == nil {
 				w.WriteHeader(http.StatusOK)
 				json.NewEncoder(w).Encode(map[string]any{"subsonic-response": map[string]any{"status": "ok", "version": "1.16.1"}})
@@ -370,6 +379,7 @@ func (n *fakeNavidrome) handler() http.Handler {
 					"album":      e.Album,
 					"track":      e.Track,
 					"discNumber": e.DiscNumber,
+					"duration":   e.Duration,
 				})
 			}
 			out = map[string]any{"status": "ok", "searchResult3": map[string]any{"song": songs}}
@@ -422,6 +432,12 @@ func (n *fakeNavidrome) setChanged(ts string) {
 	n.mu.Unlock()
 }
 
+func (n *fakeNavidrome) getCallCount() int {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return n.getCalls
+}
+
 // ---------------------------------------------------------------------------
 // Test helpers
 // ---------------------------------------------------------------------------
@@ -459,14 +475,20 @@ func entry(id, title, artist, album string, track, disc int) PlayQueueEntry {
 	return PlayQueueEntry{ID: id, Title: title, Artist: artist, Album: album, Track: track, DiscNumber: disc}
 }
 
+func entryD(id, title, artist, album string, track, disc int, dur int) PlayQueueEntry {
+	e := entry(id, title, artist, album, track, disc)
+	e.Duration = float64(dur)
+	return e
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 var testSongs = []fakeSong{
-	{"a/01.flac", "One", "Artist", "AlbumX", 1, 1},
-	{"a/02.flac", "Two", "Artist", "AlbumX", 2, 1},
-	{"a/03.flac", "Three", "Artist", "AlbumX", 3, 1},
+	{"a/01.flac", "One", "Artist", "AlbumX", 1, 1, 0},
+	{"a/02.flac", "Two", "Artist", "AlbumX", 2, 1, 0},
+	{"a/03.flac", "Three", "Artist", "AlbumX", 3, 1, 0},
 }
 
 func TestPushPush(t *testing.T) {
@@ -623,6 +645,80 @@ func TestCursorOnlyHandoff(t *testing.T) {
 	}
 	if len(fmpd.queueFilesNow()) != 3 {
 		t.Fatal("queue should not be reloaded")
+	}
+}
+
+func TestPushDurationMatch(t *testing.T) {
+	// two copies of the same song (same tags), differing only in duration:
+	// resolvePush must pick the ID whose duration matches the MPD song.
+	dup := []fakeSong{
+		{"b/01.flac", "Dupe", "Artist", "AlbumX", 1, 1, 200},
+		{"b/02.flac", "Dupe", "Artist", "AlbumX", 1, 1, 301},
+	}
+	engine, _, nav, _ := testEnv(t, dup)
+	nav.setSearch("Dupe", entryD("id-short", "Dupe", "Artist", "AlbumX", 1, 1, 200), entryD("id-long", "Dupe", "Artist", "AlbumX", 1, 1, 301))
+
+	engine.pushQueue()
+	saved := nav.getSaved()
+	if saved == nil {
+		t.Fatal("expected push")
+	}
+	if len(saved.Entry) != 2 || saved.Entry[0].ID != "id-short" || saved.Entry[1].ID != "id-long" {
+		t.Fatalf("duration disambiguation failed: %+v", saved.Entry)
+	}
+}
+
+func TestPullDurationMatch(t *testing.T) {
+	// remote has the 301s copy; findFile must pick the local file with a
+	// matching duration, not the first title match.
+	dup := []fakeSong{
+		{"b/01.flac", "Dupe", "Artist", "AlbumX", 1, 1, 200},
+		{"b/02.flac", "Dupe", "Artist", "AlbumX", 1, 1, 301},
+	}
+	engine, fmpd, nav, _ := testEnv(t, dup)
+	fmpd.clearQueue()
+	nav.setChanged(time.Now().Add(-time.Hour).UTC().Format(time.RFC3339Nano))
+	nav.setSaved(&PlayQueue{
+		Changed: time.Now().UTC().Format(time.RFC3339Nano),
+		Current: "id-long",
+		Entry:   []PlayQueueEntry{entryD("id-long", "Dupe", "Artist", "AlbumX", 1, 1, 301)},
+	})
+	fmpd.setState("stop")
+	engine.pullQueue()
+	files := fmpd.queueFilesNow()
+	if len(files) != 1 || files[0] != "b/02.flac" {
+		t.Fatalf("expected b/02.flac (301s), got %v", files)
+	}
+}
+
+func TestRemoteQueueCache(t *testing.T) {
+	engine, _, nav, _ := testEnv(t, testSongs)
+	nav.setChanged(time.Now().UTC().Format(time.RFC3339Nano))
+	nav.setSaved(&PlayQueue{
+		Changed: time.Now().UTC().Format(time.RFC3339Nano),
+		Current: "id1",
+		Entry:   []PlayQueueEntry{entry("id1", "One", "Artist", "AlbumX", 1, 1)},
+	})
+
+	// TTL short so the test can observe expiry
+	engine.remoteTTL = 30 * time.Millisecond
+
+	if _, err := engine.getRemoteQueue(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := engine.getRemoteQueue(); err != nil {
+		t.Fatal(err)
+	}
+	if c := nav.getCallCount(); c != 1 {
+		t.Fatalf("expected 1 getPlayQueue within TTL, got %d", c)
+	}
+
+	time.Sleep(50 * time.Millisecond)
+	if _, err := engine.getRemoteQueue(); err != nil {
+		t.Fatal(err)
+	}
+	if c := nav.getCallCount(); c != 2 {
+		t.Fatalf("expected refetch after TTL, got %d calls", c)
 	}
 }
 

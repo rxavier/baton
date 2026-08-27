@@ -12,6 +12,9 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 )
 
@@ -56,8 +59,8 @@ func main() {
 		}
 	}()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	log.Printf("Starting baton (mode=%s, poll=%s)", engine.getMode(), cfg.PollInterval)
 	ticker := time.NewTicker(cfg.PollInterval)
@@ -65,6 +68,13 @@ func main() {
 	for {
 		select {
 		case <-ctx.Done():
+			// let in-flight requests finish before exiting
+			sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			if err := srv.Shutdown(sctx); err != nil {
+				log.Printf("API shutdown: %v", err)
+			}
+			cancel()
+			log.Println("baton stopped")
 			return
 		case <-ticker.C:
 			if err := mpd.ensureConnected(); err != nil {

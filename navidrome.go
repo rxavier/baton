@@ -148,15 +148,16 @@ type PlayQueue struct {
 }
 
 type PlayQueueEntry struct {
-	ID         string `json:"id"`
-	Title      string `json:"title"`
-	Artist     string `json:"artist"`
-	Album      string `json:"album"`
-	Track      int    `json:"track"`
-	DiscNumber int    `json:"discNumber"`
+	ID         string  `json:"id"`
+	Title      string  `json:"title"`
+	Artist     string  `json:"artist"`
+	Album      string  `json:"album"`
+	Track      int     `json:"track"`
+	DiscNumber int     `json:"discNumber"`
+	Duration   float64 `json:"duration"` // seconds
 }
 
-func (s *Subsonic) ResolveID(title, artist, album string, track, disc *int) (string, error) {
+func (s *Subsonic) ResolveID(title, artist, album string, track, disc, duration *int) (string, error) {
 	if title == "" {
 		return "", nil
 	}
@@ -176,7 +177,7 @@ func (s *Subsonic) ResolveID(title, artist, album string, track, disc *int) (str
 		return "", nil
 	}
 	for _, song := range sr.Song {
-		if match(song, title, artist, album, track, disc) {
+		if match(song, title, artist, album, track, disc, duration) {
 			if id, ok := song["id"].(string); ok {
 				return id, nil
 			}
@@ -197,7 +198,7 @@ func (s *Subsonic) ResolveID(title, artist, album string, track, disc *int) (str
 	return "", nil
 }
 
-func match(song map[string]any, title, artist, album string, track, disc *int) bool {
+func match(song map[string]any, title, artist, album string, track, disc, duration *int) bool {
 	if t, _ := song["title"].(string); t != title {
 		return false
 	}
@@ -218,6 +219,12 @@ func match(song map[string]any, title, artist, album string, track, disc *int) b
 	}
 	if disc != nil {
 		if d, _ := normInt(song["discNumber"]); d != *disc {
+			return false
+		}
+	}
+	if duration != nil {
+		// +-2s tolerance: decoders may round the same file differently
+		if d, ok := normInt(song["duration"]); ok && (d < *duration-2 || d > *duration+2) {
 			return false
 		}
 	}
