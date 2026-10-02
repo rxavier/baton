@@ -134,7 +134,7 @@ func (a *APIServer) status(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *APIServer) push(w http.ResponseWriter, r *http.Request) {
-	a.engine.pushQueue()
+	a.engine.pushQueueManual(true)
 	writeJSON(w, map[string]string{"status": "ok"})
 }
 

@@ -359,6 +359,7 @@ func (n *fakeNavidrome) handler() http.Handler {
 		case "getPlayQueue":
 			n.getCalls++
 			if n.saved == nil {
+				n.mu.Unlock()
 				w.WriteHeader(http.StatusOK)
 				json.NewEncoder(w).Encode(map[string]any{"subsonic-response": map[string]any{"status": "ok", "version": "1.16.1"}})
 				return

@@ -27,6 +27,7 @@ type SyncEngine struct {
 	lastPushSig   string
 	lastRemoteSig string
 	lastPushTS    time.Time
+	pushed        bool // true once a real SavePlayQueue succeeded (baseline doesn't count)
 
 	mode      atomic.Value // string: auto|manual|push|pull
 	stateFile string
@@ -196,10 +197,11 @@ func (e *SyncEngine) mpdSignature() (string, bool) {
 func (e *SyncEngine) seedBaseline() {
 	sig, ok := e.mpdSignature()
 	if ok {
-		e.mu.Lock()
-		e.lastPushSig = sig
-		e.mu.Unlock()
-		log.Println("Seeded baseline from MPD (no push)")
+	e.mu.Lock()
+	e.lastPushSig = sig
+	e.pushed = false
+	e.mu.Unlock()
+	log.Println("Seeded baseline from MPD (no push)")
 	}
 }
 
@@ -234,7 +236,12 @@ func (e *SyncEngine) setRemoteQueue(pq *PlayQueue) {
 	e.remoteMu.Unlock()
 }
 
-func (e *SyncEngine) pushQueue() {
+func (e *SyncEngine) pushQueue() { e.pushQueueManual(false) }
+
+// pushQueueManual performs a push. manual=true turns every run into a
+// converging save: an unchanged-queue skip no longer suppresses it, so an
+// explicit push (API button) always restores MPD's queue to Navidrome.
+func (e *SyncEngine) pushQueueManual(manual bool) {
 	e.syncMu.Lock()
 	defer e.syncMu.Unlock()
 
@@ -244,10 +251,20 @@ func (e *SyncEngine) pushQueue() {
 	}
 	e.mu.Lock()
 	last := e.lastPushSig
+	pushed := e.pushed
 	e.mu.Unlock()
-	if sig == last {
+	if sig == last && !pushed && !manual {
+		return // seeded baseline, nothing saved yet, loop must not auto-push
+	}
+	if sig == last && pushed {
+		// MPD unchanged since our last saved push, but the remote queue may
+		// have been overwritten by another client (e.g. a phone player saving
+		// its stale cache). Re-push unless the remote still matches.
+		e.repushIfRemoteChanged(sig)
 		return
 	}
+	// otherwise: either sig changed, or manual push after baseline (never
+	// actually saved yet) — fall through to a plain save.
 	ids, curID := parseSig(sig)
 	position := e.mpd.elapsedMs()
 	if err := e.subsonic.SavePlayQueue(ids, curID, position); err != nil {
@@ -257,6 +274,7 @@ func (e *SyncEngine) pushQueue() {
 	e.mu.Lock()
 	e.lastPushSig = sig
 	e.lastPushTS = time.Now()
+	e.pushed = true
 	e.mu.Unlock()
 	log.Printf("Pushed %d songs to Navidrome (current=%s)", len(ids), curID)
 }
@@ -359,6 +377,66 @@ func (e *SyncEngine) pullQueue() {
 	e.mu.Lock()
 	e.lastRemoteSig = sig
 	e.mu.Unlock()
+}
+
+// repushIfRemoteChanged re-pushes the MPD queue when the remote queue was
+// overwritten by another client. Returns true if a push was issued.
+func (e *SyncEngine) repushIfRemoteChanged(sig string) bool {
+	lastIDs, lastCur := parseSig(sig)
+	pq, err := e.subsonic.GetPlayQueue()
+	if err != nil {
+		log.Printf("Push skipped (remote check failed): %v", err)
+		return false
+	}
+	if pq == nil {
+		pq = &PlayQueue{} // empty remote queue: definitely differs
+	}
+	remoteIDs := make([]string, 0, len(pq.Entry))
+	for _, en := range pq.Entry {
+		remoteIDs = append(remoteIDs, en.ID)
+	}
+	if sameStringSet(remoteIDs, lastIDs) && e.matchesRemoteCurrent(pq, lastCur) {
+		return false // remote is fine, nothing changed
+	}
+	if err := e.subsonic.SavePlayQueue(lastIDs, lastCur, nil); err != nil {
+		log.Printf("Re-push failed: %v", err)
+		return false
+	}
+	e.mu.Lock()
+	e.lastPushTS = time.Now()
+	e.mu.Unlock()
+	log.Printf("Re-pushed %d songs; foreign changes restored (resurrection of last MPD queue)", len(lastIDs))
+	return true
+}
+
+// matchesRemoteCurrent reports whether pq's current entry corresponds to id.
+func (e *SyncEngine) matchesRemoteCurrent(pq *PlayQueue, id string) bool {
+	if id == "" {
+		return true
+	}
+	for _, en := range pq.Entry {
+		if en.ID == id {
+			return pq.Current == "" || pq.Current == id
+		}
+	}
+	return false
+}
+
+func sameStringSet(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	counts := make(map[string]int, len(a))
+	for _, s := range a {
+		counts[s]++
+	}
+	for _, s := range b {
+		if counts[s] == 0 {
+			return false
+		}
+		counts[s]--
+	}
+	return true
 }
 
 func positionFor(pq *PlayQueue, index int) *int {
