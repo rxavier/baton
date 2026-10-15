@@ -10,6 +10,8 @@ build:
 
 .PHONY: install
 install: build
+	@getent group baton >/dev/null || groupadd --system baton
+	@id -u baton >/dev/null 2>&1 || useradd --system --gid baton --home-dir /var/lib/baton --shell /usr/sbin/nologin baton
 	install -d $(DESTDIR)$(BINDIR) $(DESTDIR)$(ETCDIR)
 	install -m 0755 $(BINARY) $(DESTDIR)$(BINDIR)/$(BINARY)
 	@if [ ! -f $(DESTDIR)$(ETCDIR)/baton.env ]; then \
@@ -21,7 +23,7 @@ install: build
 	install -m 0644 packaging/baton.service $(DESTDIR)$(SYSDIR)/baton.service
 	systemctl daemon-reload || true
 	systemctl enable baton || true
-	systemctl start baton || true
+	systemctl restart baton || true
 
 .PHONY: uninstall
 uninstall:

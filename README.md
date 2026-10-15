@@ -66,15 +66,20 @@ chmod +x baton-linux-amd64
 
 ### systemd (recommended on Linux)
 
-Requires root (it installs a system service into `/usr/local` and `/etc`):
+Installing requires root (it writes a system service into `/usr/local` and `/etc`),
+but the daemon itself runs as an unprivileged, dedicated `baton` system user:
 
 ```sh
-sudo make install       # builds, installs to /usr/local/bin, creates
-                        # /etc/baton/baton.env from .env.example, enables+starts
+sudo make install       # builds; creates the baton system user; installs to
+                        # /usr/local/bin; creates /etc/baton/baton.env; enables+starts
 systemctl status baton
 ```
 
 Edit `/etc/baton/baton.env` to set your credentials, then `sudo systemctl restart baton`.
+That file stays `0600 root` — systemd reads it as root and injects the values as
+environment variables, so the service user never needs access to it. The runtime sync
+mode is persisted under `/var/lib/baton/` (created and owned by systemd via
+`StateDirectory=baton`).
 
 Not running as root? Skip systemd and run the binary directly with your own config —
 no root needed: `baton --env-file /path/to/your.env`.
@@ -140,7 +145,7 @@ Use the **same Navidrome account** as your music clients so they all share one q
 | `POLL_INTERVAL`         | `5`                     | Poll interval (seconds) for both directions    |
 | `BATON_LISTEN`          | `127.0.0.1:8080`        | Status API + web UI address                    |
 | `BATON_API_TOKEN`       | —                       | Optional bearer token for the API              |
-| `BATON_STATE_FILE`      | `~/.local/state/baton/mode` | Where the runtime sync mode is persisted   |
+| `BATON_STATE_FILE`      | `~/.local/state/baton/mode` (systemd install: `/var/lib/baton/mode`) | Where the runtime sync mode is persisted |
 
 ### Sync modes
 

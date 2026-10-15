@@ -5,14 +5,35 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-# Environment file holds NAVIDROME_USER / NAVIDROME_PASSWORD etc.
+# Runs as an unprivileged dedicated system user (created by `make install`).
+User=baton
+Group=baton
+# Config is read by systemd itself (as root) and injected as environment
+# variables, so this file can stay 0600 root - the service user never reads it.
 EnvironmentFile=-/etc/baton/baton.env
+# Persist the runtime sync mode under /var/lib/baton (created + owned by systemd).
+StateDirectory=baton
+Environment=BATON_STATE_FILE=%S/baton/mode
 ExecStart=/usr/local/bin/baton
 Restart=on-failure
 RestartSec=5
-# Optional hardening
+
+# Hardening: baton only makes outbound TCP connections and needs no privileges.
 NoNewPrivileges=true
 PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallArchitectures=native
 
 [Install]
 WantedBy=multi-user.target
